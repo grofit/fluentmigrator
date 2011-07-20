@@ -20,16 +20,22 @@ using System;
 using System.Configuration;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Text;
 using FluentMigrator.Runner.Initialization.AssemblyLoader;
 using FluentMigrator.Runner.Processors;
+
+using System.CodeDom.Compiler;
+using System.Diagnostics;
+using Microsoft.CSharp;
 
 namespace FluentMigrator.Runner.Initialization
 {
 	public class TaskExecutor
-	{
+	{	
 		private IMigrationRunner Runner { get; set; }
 		private IRunnerContext RunnerContext { get; set; }
-		private string ConfigFile;
+        private string ConfigFile;
 		private string ConnectionString;
 
 		private bool NotUsingConfig
@@ -47,12 +53,58 @@ namespace FluentMigrator.Runner.Initialization
 
 		private void Initialize()
 		{
-			var assembly = AssemblyLoaderFactory.GetAssemblyLoader(RunnerContext.Target).Load();
-
+		    Assembly assembly;
+			if(string.IsNullOrEmpty(RunnerContext.MigrationDirectory))
+            { assembly = AssemblyLoaderFactory.GetAssemblyLoader(RunnerContext.Target).Load(); }
+			else
+			{
+			    var migrations = CollateMigrations();
+			    assembly = GenerateMigrationAssembly(migrations);
+			}
+            
 			var processor = InitializeProcessor();
 
 			Runner = new MigrationRunner(assembly, RunnerContext, processor);
 		}
+
+        private string[] CollateMigrations()
+        {
+            var migrationDirectory = RunnerContext.MigrationDirectory;
+            if (Directory.Exists(migrationDirectory))
+            {
+                return Directory.GetFiles(migrationDirectory, "*.cs");
+            }
+            throw new Exception("Unable to locate migration files for compilation");
+        }
+
+        private Assembly GenerateMigrationAssembly(string[] migrations)
+        {
+            foreach (var file in migrations)
+            {
+                Console.WriteLine("Compiling File: {0}", file);
+            }
+
+            var codeProvider = new CSharpCodeProvider();
+            var codeCompiler = codeProvider.CreateCompiler();
+            var compilerParameters = new CompilerParameters {GenerateExecutable = false};
+            compilerParameters.ReferencedAssemblies.Add("mscorlib.dll");
+            compilerParameters.ReferencedAssemblies.Add("System.dll");
+            compilerParameters.ReferencedAssemblies.Add("System.Data.dll"); 
+            compilerParameters.ReferencedAssemblies.Add(typeof(MigrationAttribute).Module.FullyQualifiedName);
+            var compilerResults = codeCompiler.CompileAssemblyFromFileBatch(compilerParameters, migrations);
+
+            if (compilerResults.Errors.HasErrors)
+            {
+                var errorBuilder = new StringBuilder();
+                foreach(CompilerError error in compilerResults.Errors)
+                {
+                    errorBuilder.AppendLine(error.ToString());
+                }
+                throw new Exception(string.Format("Error Compiling Migrations: {0}", errorBuilder.ToString()));
+            }
+
+            return compilerResults.CompiledAssembly;
+        }
 
 		public void Execute()
 		{
@@ -88,7 +140,7 @@ namespace FluentMigrator.Runner.Initialization
 
 		public IMigrationProcessor InitializeProcessor()
 		{
-			var configFile = Path.Combine( Environment.CurrentDirectory, RunnerContext.Target );
+			var configFile = Path.Combine( Environment.CurrentDirectory, RunnerContext.Target ?? string.Empty );
 			if ( File.Exists( configFile + ".config" ) )
 			{
 				var config = ConfigurationManager.OpenExeConfiguration( configFile );

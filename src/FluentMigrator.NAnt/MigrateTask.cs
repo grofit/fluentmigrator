@@ -16,6 +16,8 @@
 //
 #endregion
 
+using System.IO;
+using FluentMigrator.Runner;
 using FluentMigrator.Runner.Announcers;
 using FluentMigrator.Runner.Initialization;
 using NAnt.Core;
@@ -56,29 +58,75 @@ namespace FluentMigrator.NAnt
 		[TaskAttribute( "timeout" )]
 		public int Timeout { get; set; }
 
-		protected override void ExecuteTask()
-		{
-			var announcer = new TextWriterAnnouncer(System.Console.Out)
-			{
-				ShowElapsedTime = Verbose,
-				ShowSql = Verbose
-			};
-			var runnerContext = new RunnerContext(announcer)
-									{
-										Database = Database,
-										Connection = Connection,
-										Target = Target,
-										PreviewOnly = false,
-										Namespace = Namespace,
-										Task = Task,
-										Version = Version,
-										Steps = Steps,
-										WorkingDirectory = WorkingDirectory,
-										Profile = Profile,
-								Timeout = Timeout
-									};
+        [TaskAttribute("preview")]
+        public bool Preview { get; set; }
 
-			new TaskExecutor(runnerContext).Execute();
-		}
+        [TaskAttribute("outputfile")]
+        public string OutputFile { get; set; }
+
+        [TaskAttribute("migrationdirectory")]
+        public string MigrationDirectory { get; set; }
+
+        protected override void ExecuteTask()
+        {
+            if (string.IsNullOrEmpty(OutputFile))
+            {
+                var announcer = GetConsoleAnnouncer();
+                var runner = GenerateRunnerContext(announcer);
+                new TaskExecutor(runner).Execute();
+            }
+            else
+            {
+                using (var streamWriter = new StreamWriter(OutputFile))
+                {
+                    var announcer = GetOutputFileAnnouncer(streamWriter);
+                    var runner = GenerateRunnerContext(announcer);
+                    new TaskExecutor(runner).Execute();
+                }
+            }
+        }
+
+        protected IAnnouncer GetOutputFileAnnouncer(StreamWriter streamWriter)
+        {
+            var fileAnnouncer = new TextWriterAnnouncer(streamWriter)
+            {
+                ShowElapsedTime = false,
+                ShowSql = true
+            };
+
+            // Not quite sure why this is needed, but it is in their console runner example
+            var proxyAnnouncer = fileAnnouncer;
+
+            var consoleAnnouncer = GetConsoleAnnouncer();
+
+            return new CompositeAnnouncer(new[] { consoleAnnouncer, proxyAnnouncer });
+        }
+
+        protected IAnnouncer GetConsoleAnnouncer()
+        {
+            var consoleAnnouncer = new TextWriterAnnouncer(System.Console.Out);
+            consoleAnnouncer.ShowElapsedTime = this.Verbose;
+            consoleAnnouncer.ShowSql = this.Verbose;
+            return consoleAnnouncer;
+        }
+
+        protected IRunnerContext GenerateRunnerContext(IAnnouncer announcer)
+        {
+            var runnerContext = new RunnerContext(announcer)
+            {
+                Database = this.Database,
+                Connection = this.Connection,
+                Target = this.Target,
+                PreviewOnly = this.Preview,
+                Namespace = this.Namespace,
+                Task = this.Task,
+                Version = this.Version,
+                Steps = this.Steps,
+                WorkingDirectory = this.WorkingDirectory,
+                Profile = this.Profile,
+                MigrationDirectory = this.MigrationDirectory
+            };
+            return runnerContext;
+        }
 	}
 }

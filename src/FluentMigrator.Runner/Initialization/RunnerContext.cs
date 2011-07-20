@@ -34,8 +34,9 @@ namespace FluentMigrator.Runner.Initialization
 		public string WorkingDirectory { get; set; }
 		public string Profile { get; set; }
 		public int Timeout { get; set; }
+        public string MigrationDirectory { get; set; }
 
-		public IAnnouncer Announcer
+	    public IAnnouncer Announcer
 		{
 			get; set;
 		}
